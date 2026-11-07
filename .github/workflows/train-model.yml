@@ -1,0 +1,48 @@
+name: Entrenar y evaluar modelo de Kp
+
+on:
+  workflow_dispatch:
+    inputs:
+      from_year:
+        description: Primer año de datos
+        default: '1995'
+      train_end:
+        description: Último año de entrenamiento
+        default: '2016'
+      val_end:
+        description: Último año de validación (la prueba es posterior)
+        default: '2019'
+      synthetic:
+        description: Usar datos inventados (solo prueba de código)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: ml/requirements.txt
+      - run: pip install -r ml/requirements.txt scipy
+      - name: Entrenar y evaluar
+        run: |
+          ARGS="--from-year ${{ inputs.from_year }} --train-end ${{ inputs.train_end }} --val-end ${{ inputs.val_end }}"
+          if [ "${{ inputs.synthetic }}" = "true" ]; then ARGS="$ARGS --synthetic"; fi
+          python ml/train.py $ARGS --out ml/out
+      - name: Publicar informe en el resumen del trabajo
+        if: always()
+        run: '[ -f ml/out/report.md ] && cat ml/out/report.md >> "$GITHUB_STEP_SUMMARY" || true'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: resultados-modelo-kp
+          path: ml/out
+          if-no-files-found: ignore

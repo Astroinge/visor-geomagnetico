@@ -2,3 +2,7 @@ node_modules
 dist
 *.local
 .kiro/artifacts
+ml/data
+ml/out
+.venv
+__pycache__
