@@ -1,6 +1,14 @@
 export async function getJson<T = unknown>(url: string, signal?: AbortSignal): Promise<T> {
-  const res = await fetch(url, { signal, headers: { Accept: 'application/json' } });
-  if (!res.ok) throw new Error(`HTTP ${res.status} al consultar ${new URL(url).host}`);
+  const { host, pathname } = new URL(url);
+  let res: Response;
+  try {
+    res = await fetch(url, { signal });
+  } catch (e) {
+    if (signal?.aborted) throw e;
+    // Un fallo de red, un bloqueo CORS o un archivo retirado sin cabeceras CORS llegan aquí.
+    throw new Error(`no se pudo conectar con ${host}${pathname}`);
+  }
+  if (!res.ok) throw new Error(`HTTP ${res.status} en ${host}${pathname}`);
   return (await res.json()) as T;
 }
 

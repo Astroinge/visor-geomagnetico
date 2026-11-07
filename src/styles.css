@@ -91,6 +91,8 @@ button:focus-visible, select:focus-visible, input:focus-visible, summary:focus-v
 .map-wrap, .map { height: 100%; width: 100%; }
 .map-wrap { position: relative; }
 .map { background: #0b0f14; }
+/* Oscurece el mapa base de OSM sin depender de un proveedor de teselas oscuras. */
+.dark-tiles { filter: invert(1) hue-rotate(180deg) brightness(0.75) contrast(0.9) saturate(0.5); }
 
 .map-controls {
   position: absolute; z-index: 1000; top: 10px; right: 10px; width: 270px; max-height: calc(100% - 20px);

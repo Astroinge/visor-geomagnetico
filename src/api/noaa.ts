@@ -76,7 +76,7 @@ export async function fetchGeomagAlerts(signal?: AbortSignal): Promise<SwpcAlert
     .slice(0, 12);
 }
 
-/* ---------- Viento solar (DSCOVR / ACE) ---------- */
+/* ---------- Viento solar en L1 ---------- */
 
 export interface SolarWindPoint {
   time: Date;
@@ -86,32 +86,60 @@ export interface SolarWindPoint {
   density: number | null;
 }
 
+/**
+ * NOAA dejó de procesar DSCOVR y pasó a SOLAR-1, así que los archivos
+ * `products/solar-wind/*-1-day.json` ya no se actualizan. Los datos vigentes
+ * están en `json/rtsw/`. Mantengo el formato antiguo como respaldo.
+ */
+const SOLAR_WIND_SOURCES = [
+  { mag: `${SWPC}/json/rtsw/rtsw_mag_1m.json`, plasma: `${SWPC}/json/rtsw/rtsw_wind_1m.json` },
+  { mag: `${SWPC}/products/solar-wind/mag-1-day.json`, plasma: `${SWPC}/products/solar-wind/plasma-1-day.json` },
+];
+
 export async function fetchSolarWind(signal?: AbortSignal): Promise<SolarWindPoint[]> {
-  const [magRaw, plasmaRaw] = await Promise.all([
-    getJson(`${SWPC}/products/solar-wind/mag-1-day.json`, signal),
-    getJson(`${SWPC}/products/solar-wind/plasma-1-day.json`, signal),
-  ]);
+  const failures: string[] = [];
+  for (const src of SOLAR_WIND_SOURCES) {
+    try {
+      const [magRaw, plasmaRaw] = await Promise.all([getJson(src.mag, signal), getJson(src.plasma, signal)]);
+      const out = aggregateSolarWind(tableToRecords(magRaw), tableToRecords(plasmaRaw));
+      if (out.length > 0) return out;
+      failures.push(`${new URL(src.mag).pathname}: sin datos de las últimas 24 h`);
+    } catch (e) {
+      if (signal?.aborted) throw e;
+      failures.push(e instanceof Error ? e.message : String(e));
+    }
+  }
+  throw new Error(failures.join(' · '));
+}
+
+function aggregateSolarWind(
+  mag: Record<string, unknown>[],
+  plasma: Record<string, unknown>[],
+): SolarWindPoint[] {
   // Agrupo por bloques de 5 minutos y promedio para aligerar el gráfico.
   const bucket = 5 * 60_000;
+  const since = Date.now() - 24 * 3_600_000;
   const acc = new Map<number, { n: Record<string, number[]> }>();
   const push = (t: number, key: string, v: number | null) => {
-    if (v === null) return;
+    if (v === null || t < since) return;
     const k = Math.floor(t / bucket) * bucket;
     let e = acc.get(k);
     if (!e) acc.set(k, (e = { n: {} }));
     (e.n[key] ??= []).push(v);
   };
-  for (const r of tableToRecords(magRaw)) {
-    if (typeof r.time_tag !== 'string') continue;
-    const t = parseUtc(r.time_tag).getTime();
+  // En json/rtsw cada fila indica si es la fuente activa; las inactivas se descartan.
+  const usable = (r: Record<string, unknown>) => typeof r.time_tag === 'string' && r.active !== false;
+  for (const r of mag) {
+    if (!usable(r)) continue;
+    const t = parseUtc(r.time_tag as string).getTime();
     push(t, 'bz', num(r.bz_gsm));
     push(t, 'bt', num(r.bt));
   }
-  for (const r of tableToRecords(plasmaRaw)) {
-    if (typeof r.time_tag !== 'string') continue;
-    const t = parseUtc(r.time_tag).getTime();
-    push(t, 'speed', num(r.speed));
-    push(t, 'density', num(r.density));
+  for (const r of plasma) {
+    if (!usable(r)) continue;
+    const t = parseUtc(r.time_tag as string).getTime();
+    push(t, 'speed', num(r.proton_speed ?? r.speed));
+    push(t, 'density', num(r.proton_density ?? r.density));
   }
   const avg = (a?: number[]) => (a && a.length ? a.reduce((x, y) => x + y, 0) / a.length : null);
   return [...acc.entries()]
